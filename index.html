@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Losowacz odcinków Kiepskich (JS v3 - Naprawiony)</title>
+  <title>Losowacz odcinków Kiepskich (JS v4 - Naprawiony)</title>
   
   <style>
     body { 
@@ -135,7 +135,7 @@
         }
     }
 
-    // --- KROK 3: GŁÓWNE FUNKCJE APLIKACJI (Z KLUCZOWĄ POPRAWKĄ) ---
+    // --- KROK 3: GŁÓWNE FUNKCJE APLIKACJI (Bez zmian) ---
 
     function drawEpisode() {
         const watchedIds = loadWatchedIds();
@@ -157,49 +157,35 @@
         watchedIds.sort((a, b) => a - b); 
         saveWatchedIds(watchedIds);
         
-        // Wymuś odświeżenie listy, jeśli jest widoczna
         if (watchedList.style.display !== 'none') {
-            listWatchedEpisodes(true); // Wymuś odświeżenie
+            listWatchedEpisodes(true);
         }
     }
 
-    // ====================================================================
-    // === POPRAWIONA FUNKCJA listWatchedEpisodes ===
-    // ====================================================================
+    // Funkcja listWatchedEpisodes (z poprzedniej wersji, jest poprawna)
     function listWatchedEpisodes(forceShow = false) {
         
-        // Sprawdzamy, czy lista jest aktualnie ukryta
         const isHidden = (watchedList.style.display === 'none');
 
         if (forceShow) {
-            // PRZYPADEK 1: Wymuszamy pokazanie (np. po resecie lub losowaniu)
-            // Po prostu ją pokaż i zmień tekst przycisku.
             watchedList.style.display = 'block';
             btnList.textContent = "2. Ukryj listę obejrzanych";
-            // Kontynuuj, aby wygenerować treść
         } else {
-            // PRZYPADEK 2: Zwykłe kliknięcie (toggle)
             if (isHidden) {
-                // Była ukryta -> pokaż ją
                 watchedList.style.display = 'block';
                 btnList.textContent = "2. Ukryj listę obejrzanych";
-                // Kontynuuj, aby wygenerować treść
             } else {
-                // Była widoczna -> ukryj ją
                 watchedList.style.display = 'none';
                 btnList.textContent = "2. Pokaż listę obejrzanych";
-                // Zakończ. Nie trzeba generować treści dla czegoś, co ukrywamy.
                 return; 
             }
         }
 
-        // --- Logika generowania treści (uruchomi się tylko, gdy POKAZUJEMY) ---
-        
         const watchedIds = loadWatchedIds();
 
         if (watchedIds.length === 0) {
             watchedList.innerText = "Lista obejrzanych odcinków jest pusta.";
-            return; // Ten return jest poprawny
+            return;
         }
             
         let outputLines = ["--- Twoja lista obejrzanych odcinków (posortowana wg numeru) ---"];
@@ -218,24 +204,19 @@
         outputLines.push(`\nŁącznie obejrzano: ${count} / ${allEpisodesList.length}`);
         watchedList.innerText = outputLines.join('\n');
     }
-    // ====================================================================
-    // === KONIEC POPRAWIONEJ FUNKCJI ===
-    // ====================================================================
 
 
     function resetWatchedList() {
         if (confirm("Czy na pewno chcesz wyczyścić całą listę obejrzanych?")) {
             saveWatchedIds([]);
             outputArea.innerText = "Lista obejrzanych została wyczyszczona.";
-            
-            // Wymuś odświeżenie (i pokazanie) listy
             listWatchedEpisodes(true);
         } else {
             outputArea.innerText = "Anulowano.";
         }
     }
 
-    // --- KROK 4: URUCHOMIENIE APLIKACJI (Bez zmian) ---
+    // --- KROK 4: URUCHOMIENIE APLIKACJI (Z KLUCZOWĄ POPRAWKĄ) ---
     
     document.addEventListener('DOMContentLoaded', async () => {
     
@@ -262,9 +243,19 @@
             
             mainApp.style.display = 'block';
             
+            // Podpięcie funkcji (bez zmian)
             btnDraw.addEventListener('click', drawEpisode);
-            btnList.addEventListener('click', listWatchedEpisodes);
             btnReset.addEventListener('click', resetWatchedList);
+            
+            // ==========================================================
+            // === JEDYNA POPRAWKA JEST TUTAJ ===
+            // ==========================================================
+            // Musimy "opakować" wywołanie, aby funkcja `listWatchedEpisodes`
+            // nie otrzymała obiektu zdarzenia jako `forceShow`.
+            btnList.addEventListener('click', () => listWatchedEpisodes(false));
+            // Lub po prostu:
+            // btnList.addEventListener('click', () => listWatchedEpisodes());
+            // ==========================================================
             
         } else {
             console.error("Nie udało się załadować odcinków. Aplikacja nie zostanie uruchomiona.");
