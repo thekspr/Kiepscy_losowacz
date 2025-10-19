@@ -3,10 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Losowacz odcinków Kiepskich</title>
-  
-  <link rel="stylesheet" href="https://pyscript.net/releases/2024.1.1/core.css" />
-  <script type="module" src="https://pyscript.net/releases/2024.1.1/core.js"></script>
+  <title>Losowacz odcinków Kiepskich (JS)</title>
   
   <style>
     body { 
@@ -65,186 +62,234 @@
   </div>
 
 
-  <py-script>
-    import json
-    import random
-    import asyncio # Potrzebne do operacji sieciowych (async/await)
-    from pyodide.http import pyfetch # Do wczytywania pliku TXT
-    from js import localStorage, confirm # Dostęp do pamięci przeglądarki i okna potwierdzenia
-    from pyscript import Element, display, when # Narzędzia PyScript do łączenia HTML z Pythonem
+  <script>
+    // --- KROK 1: KONFIGURACJA ---
+    const EPISODES_FILE = 'kiepscy_odcinki.txt';
+    const WATCHED_KEY = 'kiepscy_watched_ids'; // Klucz do zapisu w localStorage
 
-    # --- KROK 1: KONFIGURACJA ---
-    
-    EPISODES_FILE = 'kiepscy_odcinki.txt' # Ten plik musi być w tym samym folderze na GitHub
-    WATCHED_KEY = 'kiepscy_watched_ids' # Klucz do zapisu w localStorage
-    
-    # Globalne zmienne do przechowywania stanu
-    all_episodes_list = []
-    episode_map = {}
+    // Globalne zmienne do przechowywania stanu
+    let allEpisodesList = [];
+    let episodeMap = {}; // Odpowiednik słownika (mapy) z Pythona
 
-    # --- KROK 2: FUNKCJE WCZYTANIA DANYCH (PRZEROBIONE) ---
+    // Referencje do elementów HTML (pobierzemy je, gdy strona się załaduje)
+    let btnDraw, btnList, btnReset, outputArea, watchedList, statusBar, mainApp;
 
-    async def load_all_episodes_from_file(filename):
-        """Wczytuje listę odcinków z pliku TXT przez sieć (fetch)."""
-        episodes = []
-        try:
-            response = await pyfetch(filename)
-            if response.status != 200:
-                Element('status-bar').write(f"BŁĄD: Nie można wczytać pliku '{filename}'. Status: {response.status}")
-                return None
+
+    // --- KROK 2: FUNKCJE WCZYTANIA DANYCH (WERSJA JS) ---
+
+    // Odpowiednik 'load_all_episodes_from_file' z Pythona
+    async function loadAllEpisodesFromFile(filename) {
+        const episodes = [];
+        try {
+            // Używamy natywnej funkcji 'fetch' do pobrania pliku
+            const response = await fetch(filename);
+            if (!response.ok) { // Sprawdzamy, czy plik został znaleziony
+                statusBar.innerText = `BŁĄD: Nie można wczytać pliku '${filename}'. Status: ${response.status}`;
+                return null;
+            }
             
-            file_content = await response.string()
+            const fileContent = await response.text(); // Odpowiednik response.string()
             
-            for line in file_content.splitlines():
-                line = line.strip()
-                if not line:
-                    continue
+            // Dzielimy plik na linie
+            const lines = fileContent.split('\n');
+            
+            // Pętla przez każdą linię (odpowiednik 'for line in f:')
+            for (const line of lines) {
+                const trimmedLine = line.trim(); // line.strip()
+                if (!trimmedLine) {
+                    continue;
+                }
                 
-                parts = line.split('.', 1)
+                // Znajdujemy pierwsze wystąpienie kropki
+                const firstDotIndex = trimmedLine.indexOf('.');
                 
-                if len(parts) == 2:
-                    raw_id = parts[0].strip()
-                    title = line 
+                if (firstDotIndex > 0) { // Upewniamy się, że kropka istnieje i nie jest pierwszym znakiem
+                    const rawId = trimmedLine.substring(0, firstDotIndex).trim();
+                    const title = trimmedLine; // Tak jak w Twoim kodzie, tytuł to cała linia
                     
-                    try:
-                        episode_id = int(raw_id)
-                        episodes.append({"id": episode_id, "title": title})
-                    except ValueError:
-                        print(f"Ostrzeżenie: Pominięto linię (błędny numer ID): '{line}'")
-                else:
-                    print(f"Ostrzeżenie: Pominięto linię (błędny format): '{line}'")
+                    // parseInt to odpowiednik int()
+                    const episodeId = parseInt(rawId, 10); 
+                    
+                    // isNaN sprawdza, czy konwersja na liczbę się udała
+                    if (!isNaN(episodeId)) {
+                        episodes.push({ id: episodeId, title: title });
+                    } else {
+                        console.warn(`Ostrzeżenie: Pominięto linię (błędny numer ID): '${trimmedLine}'`);
+                    }
+                } else {
+                    console.warn(`Ostrzeżenie: Pominięto linię (błędny format): '${trimmedLine}'`);
+                }
+            }
             
-            if not episodes:
-                Element('status-bar').write(f"Ostrzeżenie: Plik '{filename}' jest pusty lub ma zły format.")
-                return None
+            if (episodes.length === 0) {
+                statusBar.innerText = `Ostrzeżenie: Plik '${filename}' jest pusty lub ma zły format.`;
+                return null;
+            }
+            return episodes;
 
-            return episodes
+        } catch (e) {
+            statusBar.innerText = `Wystąpił nieoczekiwany błąd podczas czytania pliku '${filename}': ${e.message}`;
+            return null;
+        }
+    }
 
-        except Exception as e:
-            Element('status-bar').write(f"Wystąpił nieoczekiwany błąd podczas czytania pliku '{filename}': {e}")
-            return None
+    // Odpowiednik 'load_watched_ids'
+    function loadWatchedIds() {
+        try {
+            // Używamy natywnego 'localStorage'
+            const data = localStorage.getItem(WATCHED_KEY);
+            // JSON.parse to odpowiednik json.load()
+            return data ? JSON.parse(data) : [];
+        } catch (e) {
+            console.error("Błąd odczytu localStorage:", e);
+            return [];
+        }
+    }
 
-    def load_watched_ids():
-        """Wczytuje listę obejrzanych ID z localStorage."""
-        try:
-            data = localStorage.getItem(WATCHED_KEY)
-            if data:
-                return json.loads(data)
-        except Exception as e:
-            print(f"Błąd odczytu localStorage: {e}")
-        return [] # Zwróć pustą listę, jeśli nic nie ma lub jest błąd
+    // Odpowiednik 'save_watched_ids'
+    function saveWatchedIds(ids) {
+        try {
+            // JSON.stringify to odpowiednik json.dump()
+            localStorage.setItem(WATCHED_KEY, JSON.stringify(ids));
+        } catch (e) {
+            console.error("Błąd zapisu do localStorage:", e);
+        }
+    }
 
-    def save_watched_ids(ids):
-        """Zapisuje listę obejrzanych ID do localStorage."""
-        try:
-            localStorage.setItem(WATCHED_KEY, json.dumps(ids))
-        except Exception as e:
-            print(f"Błąd zapisu do localStorage: {e}")
+    // --- KROK 3: GŁÓWNE FUNKCJE APLIKACJI (WERSJA JS) ---
 
-    # --- KROK 3: GŁÓWNE FUNKCJE APLIKACJI (PRZEROBIONE) ---
+    // Odpowiednik 'draw_episode'
+    function drawEpisode() {
+        const watchedIds = loadWatchedIds();
+        
+        // Odpowiednik list comprehension [ep for ep in ...]
+        const unwatchedEpisodes = allEpisodesList.filter(ep => !watchedIds.includes(ep.id));
+        
+        if (unwatchedEpisodes.length === 0) {
+            // .innerText to odpowiednik .write() lub print() do elementu HTML
+            outputArea.innerText = "***************************************************\n" +
+                                 "GRATULACJE! Obejrzałeś już wszystkie odcinki.\n" +
+                                 "***************************************************";
+            return;
+        }
+            
+        // Odpowiednik random.choice()
+        const chosenEpisode = unwatchedEpisodes[Math.floor(Math.random() * unwatchedEpisodes.length)];
+        
+        outputArea.innerText = `---> Wylosowany odcinek: ${chosenEpisode.title}\n` +
+                             "(Dodano do listy obejrzanych i posortowano)";
+        
+        watchedIds.push(chosenEpisode.id);
+        // watched_ids.sort() w JS wymaga funkcji porównującej dla liczb
+        watchedIds.sort((a, b) => a - b); 
+        saveWatchedIds(watchedIds);
+        
+        // Odśwież listę, jeśli jest widoczna
+        if (watchedList.style.display !== 'none') {
+            listWatchedEpisodes(true); // Przekazujemy flagę, by wymusić odświeżenie, a nie przełączenie
+        }
+    }
+
+    // Odpowiednik 'list_watched_episodes'
+    // Dodaliśmy 'forceShow', aby móc odświeżyć listę bez ukrywania jej
+    function listWatchedEpisodes(forceShow = false) {
+        // Przełącznik widoczności
+        if (!forceShow) {
+            if (watchedList.style.display === 'none') {
+                watchedList.style.display = 'block';
+                btnList.textContent = "2. Ukryj listę obejrzanych";
+            } else {
+                watchedList.style.display = 'none';
+                btnList.textContent = "2. Pokaż listę obejrzanych";
+                return; // Przestań, jeśli ukrywamy
+            }
+        }
+        
+        const watchedIds = loadWatchedIds();
+
+        if (watchedIds.length === 0) {
+            watchedList.innerText = "Lista obejrzanych odcinków jest pusta.";
+            return;
+        }
+            
+        let outputLines = ["--- Twoja lista obejrzanych odcinków (posortowana wg numeru) ---"];
+        
+        let count = 0;
+        for (const episodeId of watchedIds) {
+            // Odpowiednik episode_map.get(episode_id)
+            const title = episodeMap[episodeId]; 
+            if (title) {
+                outputLines.push(title);
+                count++;
+            } else {
+                outputLines.push(`(Nieznany odcinek - ID: ${episodeId})`);
+            }
+        }
+
+        outputLines.push(`\nŁącznie obejrzano: ${count} / ${allEpisodesList.length}`);
+        // .join('\n') łączy tablicę w jeden tekst z nowymi liniami
+        watchedList.innerText = outputLines.join('\n');
+    }
+
+    // Odpowiednik 'reset_watched_list'
+    function resetWatchedList() {
+        // Używamy natywnego okna 'confirm' (odpowiednik input())
+        if (confirm("Czy na pewno chcesz wyczyścić całą listę obejrzanych?")) {
+            saveWatchedIds([]);
+            outputArea.innerText = "Lista obejrzanych została wyczyszczona.";
+            // Odśwież listę, jeśli jest widoczna
+            if (watchedList.style.display !== 'none') {
+                listWatchedEpisodes(true);
+            }
+        } else {
+            outputArea.innerText = "Anulowano.";
+        }
+    }
+
+    // --- KROK 4: URUCHOMIENIE APLIKACJI (WERSJA JS) ---
     
-    # Dekorator @when łączy funkcję Pythona z kliknięciem na element HTML
-    @when('click', selector='#btn-draw')
-    def draw_episode():
-        """Losuje nowy, nieobejrzany odcinek i wyświetla w HTML."""
-        watched_ids = load_watched_ids()
+    // Ta funkcja uruchomi się, gdy cały HTML się załaduje
+    // To odpowiednik 'if __name__ == "__main__":'
+    document.addEventListener('DOMContentLoaded', async () => {
+    
+        // Pobieramy elementy HTML, aby móc ich używać w JS
+        btnDraw = document.getElementById('btn-draw');
+        btnList = document.getElementById('btn-list');
+        btnReset = document.getElementById('btn-reset');
+        outputArea = document.getElementById('output-area');
+        watchedList = document.getElementById('watched-list');
+        statusBar = document.getElementById('status-bar');
+        mainApp = document.getElementById('main-app');
+    
+        // Odpowiednik 'main_startup()'
+        statusBar.innerText = "Wczytywanie listy odcinków...";
         
-        unwatched_episodes = [ep for ep in all_episodes_list if ep['id'] not in watched_ids]
+        allEpisodesList = await loadAllEpisodesFromFile(EPISODES_FILE);
         
-        output_element = Element('output-area')
-        
-        if not unwatched_episodes:
-            output_element.write("***************************************************\n"
-                                 "GRATULACJE! Obejrzałeś już wszystkie odcinki.\n"
-                                 "***************************************************")
-            return
+        if (allEpisodesList && allEpisodesList.length > 0) {
+            // Tworzymy mapę (słownik)
+            // Odpowiednik {ep['id']: ep['title'] for ep in all_episodes_list}
+            episodeMap = allEpisodesList.reduce((map, ep) => {
+                map[ep.id] = ep.title;
+                return map;
+            }, {});
             
-        chosen_episode = random.choice(unwatched_episodes)
-        
-        output_element.write(f"---> Wylosowany odcinek: {chosen_episode['title']}\n"
-                             "(Dodano do listy obejrzanych i posortowano)")
-        
-        watched_ids.append(chosen_episode['id'])
-        watched_ids.sort()
-        save_watched_ids(watched_ids)
-        
-        # Odśwież listę, jeśli jest widoczna
-        if Element('watched-list').style.display != 'none':
-            list_watched_episodes()
-
-    @when('click', selector='#btn-list')
-    def list_watched_episodes():
-        """Wyświetla listę wszystkich obejrzanych odcinków w HTML."""
-        watched_ids = load_watched_ids()
-        list_element = Element('watched-list')
-        
-        # Przełącznik widoczności
-        if list_element.style.display == 'none':
-            list_element.style.display = 'block'
-            Element('btn-list').element.innerText = "2. Ukryj listę obejrzanych"
-        else:
-            list_element.style.display = 'none'
-            Element('btn-list').element.innerText = "2. Pokaż listę obejrzanych"
-            return # Przestań, jeśli ukrywamy
-
-        if not watched_ids:
-            list_element.write("Lista obejrzanych odcinków jest pusta.")
-            return
+            statusBar.innerText = `Pomyślnie wczytano ${allEpisodesList.length} odcinków. Gotowe!`;
             
-        output_lines = ["--- Twoja lista obejrzanych odcinków (posortowana wg numeru) ---"]
-        
-        count = 0
-        for episode_id in watched_ids:
-            title = episode_map.get(episode_id)
-            if title:
-                output_lines.append(title)
-                count += 1
-            else:
-                output_lines.append(f"(Nieznany odcinek - ID: {episode_id})")
-
-        output_lines.append(f"\nŁącznie obejrzano: {count} / {len(all_episodes_list)}")
-        list_element.write("\n".join(output_lines))
-
-    @when('click', selector='#btn-reset')
-    def reset_watched_list():
-        """Resetuje (czyści) listę obejrzanych odcinków po potwierdzeniu."""
-        
-        # Używamy confirm() z przeglądarki zamiast input()
-        if confirm("Czy na pewno chcesz wyczyścić całą listę obejrzanych?"):
-            save_watched_ids([])
-            Element('output-area').write("Lista obejrzanych została wyczyszczona.")
-            # Odśwież listę, jeśli jest widoczna
-            if Element('watched-list').style.display != 'none':
-                list_watched_episodes() # To ją ukryje i zaktualizuje
-                list_watched_episodes() # To ją pokaże pustą
-        else:
-            Element('output-area').write("Anulowano.")
-
-    # --- KROK 4: URUCHOMIENIE APLIKACJI (PRZEROBIONE) ---
-
-    async def main_startup():
-        """Główna funkcja uruchamiana przy starcie strony."""
-        global all_episodes_list, episode_map
-        
-        status_bar = Element('status-bar')
-        status_bar.write("Wczytywanie listy odcinków...")
-        
-        all_episodes_list = await load_all_episodes_from_file(EPISODES_FILE)
-        
-        if all_episodes_list:
-            # Stwórz mapę dla szybszego dostępu
-            episode_map = {ep['id']: ep['title'] for ep in all_episodes_list}
+            // Pokaż główną aplikację
+            mainApp.style.display = 'block';
             
-            status_bar.write(f"Pomyślnie wczytano {len(all_episodes_list)} odcinków. Gotowe!")
+            // Podpinamy nasze funkcje pod przyciski (odpowiednik @when('click'))
+            btnDraw.addEventListener('click', drawEpisode);
+            btnList.addEventListener('click', listWatchedEpisodes);
+            btnReset.addEventListener('click', resetWatchedList);
             
-            # Pokaż główną aplikację
-            Element('main-app').style.display = 'block'
-        else:
-            status_bar.write("BŁĄD: Nie udało się załadować odcinków. Sprawdź plik .txt i odśwież stronę.")
+        } else {
+            // Ten błąd jest już ustawiany w funkcji 'loadAllEpisodesFromFile'
+            console.error("Nie udało się załadować odcinków.");
+        }
+    });
+  </script>
 
-    # Uruchom główną funkcję startową
-    asyncio.ensure_future(main_startup())
-
-  </py-script>
 </body>
 </html>
