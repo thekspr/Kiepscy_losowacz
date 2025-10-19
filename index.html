@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Losowacz odcinków Kiepskich</title>
+  
+  <link rel="stylesheet" href="https://pyscript.net/releases/2024.1.1/core.css" />
+  <script type="module" src="https://pyscript.net/releases/2024.1.1/core.js"></script>
+  
+  <style>
+    body { 
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      line-height: 1.6; 
+      background-color: #f4f4f4; 
+      color: #333;
+      max-width: 700px;
+      margin: 20px auto;
+      padding: 15px;
+    }
+    #main-app { display: none; } /* Ukrywamy apkę do czasu załadowania danych */
+    h1 { color: #2c3e50; }
+    button {
+      background-color: #3498db;
+      color: white;
+      border: none;
+      padding: 10px 15px;
+      margin: 5px 0;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 16px;
+      width: 100%;
+    }
+    button:hover { background-color: #2980b9; }
+    #btn-reset { background-color: #e74c3c; }
+    #btn-reset:hover { background-color: #c0392b; }
+    #output-area, #watched-list {
+      background-color: #ecf0f1;
+      border: 1px solid #bdc3c7;
+      padding: 15px;
+      margin-top: 15px;
+      border-radius: 5px;
+      min-height: 50px;
+      white-space: pre-wrap; /* Zachowuje nowe linie */
+      font-family: monospace;
+    }
+    #status-bar { color: #7f8c8d; }
+  </style>
+</head>
+<body>
+
+  <h1>Losowacz odcinków Kiepskich</h1>
+  <div id="status-bar">Ładowanie...</div>
+
+  <div id="main-app">
+    <button id="btn-draw">1. Losuj nowy odcinek</button>
+    <button id="btn-list">2. Pokaż listę obejrzanych</button>
+    
+    <div id="output-area">Wciśnij "Losuj", aby rozpocząć.</div>
+    
+    <div id="watched-list" style="display: none;"></div> 
+    
+    <hr style="margin: 20px 0;">
+    <button id="btn-reset">3. Zresetuj listę obejrzanych</button>
+  </div>
+
+
+  <py-script>
+    import json
+    import random
+    import asyncio # Potrzebne do operacji sieciowych (async/await)
+    from pyodide.http import pyfetch # Do wczytywania pliku TXT
+    from js import localStorage, confirm # Dostęp do pamięci przeglądarki i okna potwierdzenia
+    from pyscript import Element, display, when # Narzędzia PyScript do łączenia HTML z Pythonem
+
+    # --- KROK 1: KONFIGURACJA ---
+    
+    EPISODES_FILE = 'kiepscy_odcinki.txt' # Ten plik musi być w tym samym folderze na GitHub
+    WATCHED_KEY = 'kiepscy_watched_ids' # Klucz do zapisu w localStorage
+    
+    # Globalne zmienne do przechowywania stanu
+    all_episodes_list = []
+    episode_map = {}
+
+    # --- KROK 2: FUNKCJE WCZYTANIA DANYCH (PRZEROBIONE) ---
+
+    async def load_all_episodes_from_file(filename):
+        """Wczytuje listę odcinków z pliku TXT przez sieć (fetch)."""
+        episodes = []
+        try:
+            response = await pyfetch(filename)
+            if response.status != 200:
+                Element('status-bar').write(f"BŁĄD: Nie można wczytać pliku '{filename}'. Status: {response.status}")
+                return None
+            
+            file_content = await response.string()
+            
+            for line in file_content.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                
+                parts = line.split('.', 1)
+                
+                if len(parts) == 2:
+                    raw_id = parts[0].strip()
+                    title = line 
+                    
+                    try:
+                        episode_id = int(raw_id)
+                        episodes.append({"id": episode_id, "title": title})
+                    except ValueError:
+                        print(f"Ostrzeżenie: Pominięto linię (błędny numer ID): '{line}'")
+                else:
+                    print(f"Ostrzeżenie: Pominięto linię (błędny format): '{line}'")
+            
+            if not episodes:
+                Element('status-bar').write(f"Ostrzeżenie: Plik '{filename}' jest pusty lub ma zły format.")
+                return None
+
+            return episodes
+
+        except Exception as e:
+            Element('status-bar').write(f"Wystąpił nieoczekiwany błąd podczas czytania pliku '{filename}': {e}")
+            return None
+
+    def load_watched_ids():
+        """Wczytuje listę obejrzanych ID z localStorage."""
+        try:
+            data = localStorage.getItem(WATCHED_KEY)
+            if data:
+                return json.loads(data)
+        except Exception as e:
+            print(f"Błąd odczytu localStorage: {e}")
+        return [] # Zwróć pustą listę, jeśli nic nie ma lub jest błąd
+
+    def save_watched_ids(ids):
+        """Zapisuje listę obejrzanych ID do localStorage."""
+        try:
+            localStorage.setItem(WATCHED_KEY, json.dumps(ids))
+        except Exception as e:
+            print(f"Błąd zapisu do localStorage: {e}")
+
+    # --- KROK 3: GŁÓWNE FUNKCJE APLIKACJI (PRZEROBIONE) ---
+    
+    # Dekorator @when łączy funkcję Pythona z kliknięciem na element HTML
+    @when('click', selector='#btn-draw')
+    def draw_episode():
+        """Losuje nowy, nieobejrzany odcinek i wyświetla w HTML."""
+        watched_ids = load_watched_ids()
+        
+        unwatched_episodes = [ep for ep in all_episodes_list if ep['id'] not in watched_ids]
+        
+        output_element = Element('output-area')
+        
+        if not unwatched_episodes:
+            output_element.write("***************************************************\n"
+                                 "GRATULACJE! Obejrzałeś już wszystkie odcinki.\n"
+                                 "***************************************************")
+            return
+            
+        chosen_episode = random.choice(unwatched_episodes)
+        
+        output_element.write(f"---> Wylosowany odcinek: {chosen_episode['title']}\n"
+                             "(Dodano do listy obejrzanych i posortowano)")
+        
+        watched_ids.append(chosen_episode['id'])
+        watched_ids.sort()
+        save_watched_ids(watched_ids)
+        
+        # Odśwież listę, jeśli jest widoczna
+        if Element('watched-list').style.display != 'none':
+            list_watched_episodes()
+
+    @when('click', selector='#btn-list')
+    def list_watched_episodes():
+        """Wyświetla listę wszystkich obejrzanych odcinków w HTML."""
+        watched_ids = load_watched_ids()
+        list_element = Element('watched-list')
+        
+        # Przełącznik widoczności
+        if list_element.style.display == 'none':
+            list_element.style.display = 'block'
+            Element('btn-list').element.innerText = "2. Ukryj listę obejrzanych"
+        else:
+            list_element.style.display = 'none'
+            Element('btn-list').element.innerText = "2. Pokaż listę obejrzanych"
+            return # Przestań, jeśli ukrywamy
+
+        if not watched_ids:
+            list_element.write("Lista obejrzanych odcinków jest pusta.")
+            return
+            
+        output_lines = ["--- Twoja lista obejrzanych odcinków (posortowana wg numeru) ---"]
+        
+        count = 0
+        for episode_id in watched_ids:
+            title = episode_map.get(episode_id)
+            if title:
+                output_lines.append(title)
+                count += 1
+            else:
+                output_lines.append(f"(Nieznany odcinek - ID: {episode_id})")
+
+        output_lines.append(f"\nŁącznie obejrzano: {count} / {len(all_episodes_list)}")
+        list_element.write("\n".join(output_lines))
+
+    @when('click', selector='#btn-reset')
+    def reset_watched_list():
+        """Resetuje (czyści) listę obejrzanych odcinków po potwierdzeniu."""
+        
+        # Używamy confirm() z przeglądarki zamiast input()
+        if confirm("Czy na pewno chcesz wyczyścić całą listę obejrzanych?"):
+            save_watched_ids([])
+            Element('output-area').write("Lista obejrzanych została wyczyszczona.")
+            # Odśwież listę, jeśli jest widoczna
+            if Element('watched-list').style.display != 'none':
+                list_watched_episodes() # To ją ukryje i zaktualizuje
+                list_watched_episodes() # To ją pokaże pustą
+        else:
+            Element('output-area').write("Anulowano.")
+
+    # --- KROK 4: URUCHOMIENIE APLIKACJI (PRZEROBIONE) ---
+
+    async def main_startup():
+        """Główna funkcja uruchamiana przy starcie strony."""
+        global all_episodes_list, episode_map
+        
+        status_bar = Element('status-bar')
+        status_bar.write("Wczytywanie listy odcinków...")
+        
+        all_episodes_list = await load_all_episodes_from_file(EPISODES_FILE)
+        
+        if all_episodes_list:
+            # Stwórz mapę dla szybszego dostępu
+            episode_map = {ep['id']: ep['title'] for ep in all_episodes_list}
+            
+            status_bar.write(f"Pomyślnie wczytano {len(all_episodes_list)} odcinków. Gotowe!")
+            
+            # Pokaż główną aplikację
+            Element('main-app').style.display = 'block'
+        else:
+            status_bar.write("BŁĄD: Nie udało się załadować odcinków. Sprawdź plik .txt i odśwież stronę.")
+
+    # Uruchom główną funkcję startową
+    asyncio.ensure_future(main_startup())
+
+  </py-script>
+</body>
+</html>
